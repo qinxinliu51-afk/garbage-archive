@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Garbage Museum - Collection</title>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; background-color: #f7f5f2; overflow: hidden; font-family: 'Space Mono', monospace; }
+        canvas { display: block; }
+        
+        /* 导航栏样式 */
+        .nav { 
+            position: fixed; top: 0; width: 100%; height: 80px;
+            display: flex; justify-content: center; align-items: center;
+            gap: 60px; z-index: 9999; background: rgba(247, 245, 242, 0.7);
+            backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+        }
+        .nav a { 
+            font-family: 'Space Mono', monospace; font-size: 12px; text-decoration: none; 
+            color: #888; letter-spacing: 3px; text-transform: uppercase;
+            transition: all 0.3s ease; padding: 10px 15px; line-height: 1; font-weight: 400;
+        }
+        .nav a:hover { color: #000; }
+        .nav a.active { color: #222; font-weight: 700; border-bottom: 2px solid #222; }
+        
+        /* 入场过渡效果 */
+        #entrance-fade-overlay {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background-color: #f7f5f2; z-index: 100000; pointer-events: none;
+            transition: opacity 2s cubic-bezier(0.4, 0, 0.2, 1); opacity: 1;
+        }
+
+        /* 悬浮信息面板 */
+        #info-panel {
+            position: fixed; pointer-events: none; display: none;
+            background: rgba(255, 255, 255, 0.5); backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(135, 206, 235, 0.3);
+            padding: 15px 20px; color: #444; z-index: 1000; min-width: 200px;
+            box-shadow: 10px 10px 30px rgba(0,0,0,0.05);
+        }
+        .info-tag { font-size: 13px; color: #666; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; font-weight: 400; }
+        .info-name { font-size: 18px; font-weight: 700; color: #111; letter-spacing: 1px; }
+
+        #status { position: fixed; bottom: 20px; left: 20px; font-size: 10px; color: #888; z-index: 100; }
+        #hint { position: fixed; bottom: 20px; right: 20px; font-size: 10px; color: #bbb; z-index: 100; }
+    </style>
+</head>
+<body>
+
+    <div id="entrance-fade-overlay"></div>
+    <div id="status">正在加载陈列馆...</div>
+    <div id="hint">DOUBLE CLICK TO INSPECT</div>
+    
+    <div id="info-panel">
+        <div class="info-tag" id="panel-tag"></div>
+        <div class="info-name" id="panel-name"></div>
+    </div>
+
+    <nav class="nav">
+        <a href="index.html">HOME</a>
+        <a href="collection.html" class="active">COLLECTION</a>
+        <a href="about.html">ME</a>
+    </nav>
+
+    <script type="importmap">
+        { "imports": { 
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js", 
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" 
+        } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { OutlinePass } from 'three/addons/postprocessing/OutlinePass.js';
+        import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+        // 配置列表：targetPage 对应跳转的目标 HTML
+        const poolConfig = [
+            { name: '一角又一角', url: 'bottle.glb', scale: 1.6, targetPage: 'archive.html', archiveSource: 'LQX' },
+            { name: '一只小熊', url: 'bear.glb',   scale: 1.7, targetPage: 'archive.html', archiveSource: 'LQX' },
+            { name: '哑巴小狗',   url: 'dog.glb',    scale: 2.0, targetPage: 'archive.html', archiveSource: 'LQX' },
+            { name: '被锁住的', url: 'dairy.glb',  scale: 2.0, targetPage: 'archive.html', archiveSource: 'LQX' },
+            { name: '已过期',   url: 'flavor.glb', scale: 2.0, targetPage: 'archive.html', archiveSource: 'LQX' },
+            { name: '天才手枪', url: 'gun.glb',     scale: 1.8, targetPage: 'gun.html', archiveSource: 'DWD' },
+            { name: '咖啡杯',   url: 'cup.glb',     scale: 1.5, targetPage: 'cup.html', archiveSource: 'OHH' },
+            { name: '内容未知', url: 'machine.glb', scale: 1.9, targetPage: 'machine.html', archiveSource: 'UNKNOWN' },
+            { name: '种子',     url: 'seed.glb',    scale: 1.2, targetPage: 'seed.html', archiveSource: 'NANA' }
+        ];
+
+        const poolSize = 27; 
+        const models = [];
+        let scrollY = 0;
+        let targetScrollY = 0;
+        let autoFloatY = 0; 
+        let currentHovered = null;
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 50;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.body.appendChild(renderer.domElement);
+
+        // 处理入场动画
+        window.addEventListener('load', () => {
+            const overlay = document.getElementById('entrance-fade-overlay');
+            requestAnimationFrame(() => { if(overlay) overlay.style.opacity = '0'; });
+        });
+
+        scene.add(new THREE.AmbientLight(0xffffff, 2.8));
+        const light = new THREE.DirectionalLight(0xffffff, 2.5);
+        light.position.set(20, 40, 20);
+        scene.add(light);
+
+        // 后期处理：描边
+        const composer = new EffectComposer(renderer);
+        composer.addPass(new RenderPass(scene, camera));
+        const outlinePass = new OutlinePass(new THREE.Vector2(window.innerWidth, window.innerHeight), scene, camera);
+        outlinePass.edgeStrength = 8.0; 
+        outlinePass.edgeThickness = 2.0; 
+        outlinePass.visibleEdgeColor.set('#87ceeb'); 
+        composer.addPass(outlinePass);
+        composer.addPass(new OutputPass());
+
+        const loader = new GLTFLoader();
+
+        async function init() {
+            for(let i = 0; i < poolSize; i++) {
+                const config = poolConfig[i % poolConfig.length];
+                loader.load(config.url, (gltf) => {
+                    setupObject(gltf.scene, i, config);
+                });
+            }
+        }
+
+        function setupObject(obj, index, config) {
+            const col = index % 3; 
+            const row = Math.floor(index / 3);
+            const x = (col - 1) * 26 + (Math.random() - 0.5) * 10;
+            const y = -row * 28 + (Math.random() - 0.5) * 15; 
+            obj.position.set(x, y, (Math.random() - 0.5) * 10);
+            
+            const box = new THREE.Box3().setFromObject(obj);
+            const size = box.getSize(new THREE.Vector3());
+            const finalS = (8.8 / Math.max(size.x, size.y, size.z)) * config.scale;
+            obj.scale.set(finalS, finalS, finalS);
+
+            // 存储数据
+            obj.userData = { 
+                baseY: y, baseX: x,
+                rotSpeed: (Math.random() - 0.5) * 0.01,
+                floatSeed: Math.random() * 100,
+                displayName: config.name,
+                targetPage: config.targetPage, // 存储目标 HTML
+                archiveLabel: config.archiveSource ? `来自${config.archiveSource}的档案馆` : `来自未知的档案馆` 
+            };
+
+            scene.add(obj);
+            models.push(obj);
+            document.getElementById('status').innerText = `COLLECTION: ${models.length} / ${poolSize}`;
+        }
+
+        // 双击跳转逻辑：附加 autoOpen 参数
+        window.addEventListener('dblclick', () => {
+            if (currentHovered) {
+                const target = currentHovered.userData.targetPage;
+                if(target) {
+                    // 跳转并告知目标页面自动执行抽出动画
+                    window.location.href = `${target}?autoOpen=true`;
+                }
+            }
+        });
+
+        // 射线检测
+        window.addEventListener('mousemove', (event) => {
+            const mouse = new THREE.Vector2();
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(models, true);
+            
+            if (intersects.length > 0) {
+                let sel = intersects[0].object;
+                while (sel.parent && !models.includes(sel)) sel = sel.parent;
+                currentHovered = sel;
+                
+                outlinePass.selectedObjects = [sel];
+                document.body.style.cursor = 'pointer';
+
+                document.getElementById('panel-tag').innerText = sel.userData.archiveLabel; 
+                document.getElementById('panel-name').innerText = sel.userData.displayName;
+                
+                document.getElementById('info-panel').style.display = 'block';
+                updatePanelPosition(sel);
+            } else {
+                currentHovered = null;
+                outlinePass.selectedObjects = [];
+                document.body.style.cursor = 'default';
+                document.getElementById('info-panel').style.display = 'none';
+            }
+        });
+
+        function updatePanelPosition(obj) {
+            const vector = new THREE.Vector3();
+            obj.getWorldPosition(vector);
+            vector.project(camera);
+            const x = (vector.x * .5 + .5) * window.innerWidth;
+            const y = (vector.y * -.5 + .5) * window.innerHeight;
+            const infoPanel = document.getElementById('info-panel');
+            infoPanel.style.left = `${x + 50}px`;
+            infoPanel.style.top = `${y - 50}px`;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            scrollY = THREE.MathUtils.lerp(scrollY, targetScrollY, 0.08);
+            autoFloatY += 0.012; 
+            const time = performance.now() * 0.001;
+
+            models.forEach(m => {
+                m.position.y = m.userData.baseY + scrollY + autoFloatY;
+                m.position.x = m.userData.baseX + Math.sin(time + m.userData.floatSeed) * 0.4;
+                m.rotation.y += m.userData.rotSpeed;
+
+                // 无缝循环
+                if (m.position.y > 100) m.userData.baseY -= (poolSize / 3) * 28;
+                if (m.position.y < -150) m.userData.baseY += (poolSize / 3) * 28;
+            });
+
+            composer.render();
+        }
+
+        window.addEventListener('wheel', (e) => {
+            targetScrollY += e.deltaY * 0.05;
+        }, { passive: true });
+
+        init();
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

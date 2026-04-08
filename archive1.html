@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Archive - Garbage Museum</title>
+    <script type="importmap">
+        { 
+            "imports": { 
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            } 
+        }
+    </script>
+    <style>
+        :root {
+            --bg-color: #f7f5f2; 
+            --glass-bg: rgba(252, 252, 252, 1);
+            --border-color: #00000096;
+            --pull-dist: -320px; 
+            --hover-stroke: #4a90e2;
+        }
+
+        body {
+            margin: 0; background-color: var(--bg-color);
+            display: flex; justify-content: center; align-items: flex-end;
+            height: 100vh; overflow: hidden;
+            font-family: "Helvetica Neue", Arial, sans-serif; user-select: none;
+        }
+
+        #entrance-fade-overlay {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background-color: var(--bg-color); z-index: 100000;
+            pointer-events: none; transition: opacity 1.5s ease-out; opacity: 1;
+        }
+
+        #global-exit-btn {
+            position: fixed; top: 30px; left: 30px; padding: 12px 24px; 
+            background: rgba(255, 255, 255, 0.6); backdrop-filter: blur(10px);
+            border: 1px solid rgba(0,0,0,0.1); border-radius: 50px;
+            color: #111; font-size: 14px; font-weight: bold; cursor: pointer;
+            z-index: 5000; box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            transition: all 0.3s ease; display: flex; align-items: center;
+        }
+        #global-exit-btn:hover { background: rgba(255, 255, 255, 0.9); transform: translateX(-3px); }
+
+        .back-btn-common {
+            position: fixed; top: 30px; left: 30px; padding: 12px 24px; 
+            background: rgba(255, 255, 255, 0.6); backdrop-filter: blur(10px);
+            border: 1px solid rgba(0,0,0,0.1); border-radius: 50px;
+            color: #111; font-size: 14px; font-weight: bold; cursor: pointer;
+            z-index: 30000; box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            transition: all 0.3s ease; opacity: 0; pointer-events: none;
+        }
+        .back-btn-common:hover { background: rgba(255, 255, 255, 0.9); transform: translateX(-3px); }
+
+        #viewer-overlay {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: var(--bg-color); z-index: 40000;
+            display: none; opacity: 0; transition: opacity 0.4s ease;
+            cursor: grab;
+        }
+        #viewer-overlay.active { display: block; opacity: 1; }
+        #viewer-overlay canvas { display: block; width: 100vw !important; height: 100vh !important; }
+
+        .cabinet {
+            position: relative; width: 800px; height: 600px; 
+            perspective: 3000px; margin-bottom: -50px;
+        }
+
+        .folder {
+            position: absolute; width: 100%; height: 380px; left: 0;
+            transform-origin: center center;
+            transition: transform 1.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.7s;
+            filter: drop-shadow(0px -1px 0px var(--border-color)) 
+                    drop-shadow(1px 0px 0px var(--border-color)) 
+                    drop-shadow(-1px 0px 0px var(--border-color));
+            z-index: 10; transform-style: preserve-3d;
+        }
+
+        .folder.pulled-out { transform: translateY(var(--pull-dist)) rotateX(-10deg) !important; }
+
+        .folder-shadow {
+            position: absolute; width: 100%; height: 100%;
+            background: #fdfdfd; border: 1px solid var(--border-color); 
+            border-radius: 12px 12px 0 0; opacity: 0; pointer-events: none;
+        }
+
+        .flipped .folder-shadow { opacity: 1; transition: opacity 0.4s ease; pointer-events: auto; }
+
+        .book-wrap {
+            width: 100%; height: 100%; position: relative;
+            transform-style: preserve-3d; transition: transform 2s cubic-bezier(0.4, 0, 0.2, 1);
+            transform-origin: center bottom;
+        }
+
+        .flipped .book-wrap { transform: rotateX(180deg); }
+
+        .face {
+            position: absolute; width: 100%; height: 100%;
+            backface-visibility: hidden; border: 1px solid var(--border-color);
+            transform-style: preserve-3d;
+        }
+
+        .face-a {
+            background: var(--glass-bg); display: flex; flex-direction: column; 
+            align-items: center; padding-top: 45px; z-index: 2; border-radius: 12px 12px 0 0;
+        }
+
+        .face-b {
+            background: #fdfdfd; transform: rotateX(180deg); 
+            z-index: 1; border-radius: 0 0 12px 12px; 
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        .hover-target { transition: all 0.3s; outline: 2px solid transparent; outline-offset: -2px; }
+        .hover-target:hover { outline: 2px solid var(--hover-stroke); }
+
+        /* 重要修复：显式设定宽高，确保 WebGL 初始计算有值 */
+        .model-area { 
+            position: relative; 
+            width: 240px; 
+            height: 180px; 
+            background: #f4f4f4; 
+            cursor: pointer; 
+            overflow: visible; 
+            z-index: 100;
+        }
+        .model-slot { width: 85%; height: 300px; background: rgba(0,0,0,0.03); border-radius: 8px; overflow: hidden; }
+
+        .main-paper {
+            width: 85%; min-height: 650px; background: #fdfaf3; box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            padding: 40px; box-sizing: border-box; border: 1px solid #d4cbb3;
+            position: relative;
+        }
+        .main-paper h3 { margin: 0 0 20px 0; border-bottom: 2px solid #333; font-size: 18px; letter-spacing: 2px; }
+        .main-paper p { 
+            font-size: 14px; line-height: 1.8; color: #333; 
+            background: linear-gradient(#f0f0f0 1px, transparent 1px); 
+            background-size: 100% 1.8em; text-align: justify;
+        }
+
+        #folder-3 .tab span, #folder-3 .main-paper {
+            filter: url(#pixelate-filter) !important;
+            image-rendering: pixelated; transform: translateZ(10px); 
+        }
+
+        #folder-3 .main-paper * { color: #000 !important; letter-spacing: 1px; }
+
+        .pixel-mosiac-canvas { image-rendering: pixelated; image-rendering: crisp-edges; width: 100% !important; height: 100% !important; display: block; }
+
+        .garbage-badge {
+            position: absolute; top: 15px; left: 50%; transform: translateX(-50%);
+            background-color: #add8e6; padding: 5px 18px; border-radius: 20px;
+            font-size: 11px; font-weight: bold; color: #444; border: 1px solid rgba(0,0,0,0.15); z-index: 100;
+        }
+
+        .tab {
+            position: absolute; top: -39px; height: 40px; width: 180px;
+            background: var(--glass-bg); border-radius: 12px 12px 0 0;
+            display: flex; align-items: center; justify-content: center;
+            border: 1px solid var(--border-color); border-bottom: none; 
+            transform: perspective(100px) rotateX(25deg) translateZ(1px);
+        }
+        .tab span { color: #222; font-size: 11px; font-weight: bold; transform: rotateX(-25deg); transition: opacity 0.3s; }
+        .flipped .tab span { opacity: 0; }
+
+        .pocket-front { 
+            position: absolute; left: 40px; bottom: 60px; width: 300px; height: 90px; 
+            background: rgba(225, 241, 246, 0.85); backdrop-filter: blur(0.5px); 
+            border: 1px solid rgba(255,255,255,0.4); border-top: none; border-radius: 0 0 8px 8px; z-index: 20;
+        }
+
+        .model-paper {
+            position: absolute; left: 50px; bottom: 80px; width: 280px; height: 320px; background: #fff;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1); padding: 20px; box-sizing: border-box; border: 1px solid #ddd; 
+            z-index: 5; transition: transform 0.4s;
+        }
+        .model-paper.extracted { transform: translateY(-130px) !important; }
+
+        .front-panel {
+            position: absolute; width: 100%; height: 380px; bottom: -160px;
+            background: rgba(220, 228, 232, 0.9); backdrop-filter: blur(15px);
+            border: 1.5px solid var(--border-color); border-radius: 12px 12px 0 0; z-index: 40; transition: opacity 0.5s;
+        }
+
+        .content-fix-box {
+            transform: rotate(-90deg); position: absolute;
+            top: 50%; left: 50%; translate: -50% -50%;
+            display: flex; align-items: center; justify-content: center;
+            width: 380px; height: 800px; pointer-events: none;
+        }
+        .content-fix-box > * { pointer-events: auto; }
+
+        .f1 { z-index: 20; bottom: -110px; } .f2 { z-index: 19; bottom: -68px; }
+        .f3 { z-index: 18; bottom: -26px; } .f4 { z-index: 17; bottom: 16px; }
+        .f5 { z-index: 16; bottom: 58px; } .f6 { z-index: 15; bottom: 100px; }
+        .f1 .tab { left: 40px; } .f2 .tab { left: 240px; } .f3 .tab { left: 440px; }
+        .f4 .tab { left: 100px; } .f5 .tab { left: 300px; } .f6 .tab { left: 520px; }
+    </style>
+</head>
+<body>
+
+<div id="entrance-fade-overlay"></div>
+
+<svg style="position: absolute; width: 0; height: 0; pointer-events: none;">
+    <filter id="pixelate-filter" x="0" y="0">
+        <feFlood x="2" y="2" height="1" width="1"/>
+        <feComposite width="4" height="4"/>
+        <feTile result="tile"/>
+        <feComposite in="SourceGraphic" in2="tile" operator="in"/>
+        <feMorphology operator="dilate" radius="1.2"/>
+    </filter>
+</svg>
+
+<div id="global-exit-btn">< 返回</div>
+
+<div id="viewer-overlay">
+    <div class="back-btn-common" id="viewer-close-btn" style="opacity: 1; pointer-events: auto;">< 返回</div>
+</div>
+
+<div class="cabinet">
+    <div class="folder f6" id="folder-6"><div class="folder-shadow"></div><div class="book-wrap"><div class="tab"><span>已过期</span></div><div class="face face-a"><div class="model-slot"></div></div><div class="face face-b"></div></div></div>
+    <div class="folder f5" id="folder-5"><div class="folder-shadow"></div><div class="book-wrap"><div class="tab"><span>一只小熊</span></div><div class="face face-a"><div class="model-slot"></div></div><div class="face face-b"></div></div></div>
+    <div class="folder f4" id="folder-4"><div class="folder-shadow"></div><div class="book-wrap"><div class="tab"><span>一角又一角</span></div><div class="face face-a"><div class="model-slot"></div></div><div class="face face-b"></div></div></div>
+    <div class="folder f3" id="folder-3"><div class="folder-shadow"></div><div class="book-wrap"><div class="tab"><span>ARCHIVE_03</span></div><div class="face face-a"><div class="model-slot"></div></div><div class="face face-b"></div></div></div>
+    <div class="folder f2" id="folder-2"><div class="folder-shadow"></div><div class="book-wrap"><div class="tab"><span>哑巴小狗</span></div><div class="face face-a"><div class="model-slot"></div></div><div class="face face-b"></div></div></div>
+    <div class="folder f1" id="folder-1"><div class="folder-shadow"></div><div class="book-wrap"><div class="tab"><span>被锁住的</span></div><div class="face face-a"><div class="model-slot"></div></div><div class="face face-b"></div></div></div>
+    <div class="front-panel"><div class="garbage-badge">GARBAGE ARCHIVE</div></div>
+</div>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    const rendererInstances = new Map();
+
+    window.addEventListener('DOMContentLoaded', () => {
+        const overlay = document.getElementById('entrance-fade-overlay');
+        setTimeout(() => {
+            overlay.style.opacity = '0';
+            setTimeout(() => overlay.remove(), 1500);
+        }, 100);
+    });
+
+    function handleSmartBack() {
+        window.location.href = document.referrer.includes('about.html') ? 'about.html' : 'collection.html';
+    }
+    document.getElementById('global-exit-btn').onclick = handleSmartBack;
+
+    const itemConfigs = {
+        "folder-1": { path: "dairy.glb", info: { name: "日记本", time: "约2010-至今", desc: "封存的童年秘密" }, cover: { scale: 3, pos: [0, 0, 0], rot: [0.2, 1, 1] }, inner: { scale: 3, pos: [0, -0.2, 0], rot: [0.5, 0.5, 0] }, full: { scale: 4, pos: [0, 0, 0], rot: [1, 1, 0] } },
+        "folder-2": { path: "dog.glb", info: { name: "哑巴小狗", time: "约2010-至今", desc: "曾以为它会因没电而死掉的玩伴" }, cover: { scale: 3.0, pos: [0, 0.2, 0], rot: [0, 1.5, 0] }, inner: { scale: 2.2, pos: [0, 0, 0], rot: [0, 1.5, 0] }, full: { scale: 4.0, pos: [0, 0, 0], rot: [0, 0, 0] } },
+        "folder-3": { path: "brochure.glb", info: { name: "机密档案", time: "Unknown", desc: "无法被肉眼解析的像素化记忆" }, cover: { scale: 3.5, pos: [0, 0.4, 0], rot: [1, 0.2, 0] }, inner: { scale: 2.8, pos: [0, 0, 0], rot: [1, 0.2, 0] }, full: { scale: 4.2, pos: [0, 0, 0], rot: [1, 0, 0] } },
+        "folder-4": { path: "bottle.glb", info: { name: "储蓄罐", time: "2012-至今", desc: "一角一角攒出来的冰激凌自由" }, cover: { scale: 3, pos: [0, -0.1, 0], rot: [0, 1, 0] }, inner: { scale: 2.4, pos: [0, 0, 0], rot: [0, 1, 0] }, full: { scale: 3.8, pos: [0, 0, 0], rot: [0, 0, 0] } },
+        "folder-5": { path: "bear.glb", info: { name: "破旧的泰迪熊", time: "五岁生日-至今", desc: "承载了无数次失眠时拥抱的灰尘" }, cover: { scale: 2.5, pos: [0, 0, 0], rot: [1, 0.5, 0] }, inner: { scale: 2.2, pos: [0, -0.2, 0], rot: [1, 0.8, 0] }, full: { scale: 4.0, pos: [0, 0, 0], rot: [1, 0, 0] } },
+        "folder-6": { path: "flavor.glb", info: { name: "过期的调料瓶", time: "2007-至今", desc: "奶奶的“宝贝”" }, cover: { scale: 3.2, pos: [0, 0, 0], rot: [0.5, 1, 0] }, inner: { scale: 2.8, pos: [0, 0, 0], rot: [0.5, 0, 0] }, full: { scale: 4.5, pos: [0, 0, 0], rot: [0, 0, 0] } }
+    };
+
+    let startY = 0, activeFolder = null, activeDrag = null, dragStartY = 0;
+    const folders = document.querySelectorAll('.folder');
+    const panel = document.querySelector('.front-panel');
+    const rotationManager = new Map();
+
+    const viewerOverlay = document.getElementById('viewer-overlay');
+    let viewerScene, viewerCamera, viewerRenderer, viewerPivot;
+    let isDraggingViewer = false, previousMousePosition = { x: 0, y: 0 };
+
+    function initGlobalViewer() {
+        viewerScene = new THREE.Scene();
+        viewerCamera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        viewerCamera.position.z = 8;
+        viewerRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        viewerRenderer.setSize(window.innerWidth, window.innerHeight);
+        viewerOverlay.appendChild(viewerRenderer.domElement);
+        viewerScene.add(new THREE.AmbientLight(0xffffff, 2.5));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        dirLight.position.set(5, 5, 5);
+        viewerScene.add(dirLight);
+        viewerOverlay.addEventListener('mousedown', e => { isDraggingViewer = true; previousMousePosition = { x: e.clientX, y: e.clientY }; });
+        window.addEventListener('mousemove', e => {
+            if (!isDraggingViewer || !viewerPivot) return;
+            viewerPivot.rotation.y += (e.clientX - previousMousePosition.x) * 0.01;
+            viewerPivot.rotation.x += (e.clientY - previousMousePosition.y) * 0.01;
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+        window.addEventListener('mouseup', () => isDraggingViewer = false);
+        function animateViewer() { requestAnimationFrame(animateViewer); viewerRenderer.render(viewerScene, viewerCamera); }
+        animateViewer();
+    }
+
+    function openViewer(configId) {
+        const config = itemConfigs[configId];
+        if (!config) return;
+        if(viewerPivot) viewerScene.remove(viewerPivot);
+        viewerOverlay.classList.add('active');
+        
+        const w = window.innerWidth, h = window.innerHeight;
+        viewerRenderer.setSize(w, h);
+        viewerCamera.aspect = w / h;
+        viewerCamera.updateProjectionMatrix();
+
+        new GLTFLoader().load(config.path, (gltf) => {
+            const model = gltf.scene;
+            viewerPivot = new THREE.Group();
+            const box = new THREE.Box3().setFromObject(model);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            const scale = config.full.scale / Math.max(size.x, size.y, size.z); 
+            
+            model.scale.setScalar(scale);
+            model.position.set(-center.x * scale, -center.y * scale, -center.z * scale); 
+            
+            viewerPivot.add(model);
+            viewerPivot.rotation.set(config.full.rot[0], config.full.rot[1], config.full.rot[2]);
+            viewerScene.add(viewerPivot);
+        });
+    }
+
+    document.getElementById('viewer-close-btn').onclick = () => {
+        viewerOverlay.classList.remove('active');
+    };
+
+    function initThreeJS(container, configId, parentFolder, isMosaic = false) {
+        if (!container || container.children.length > 0) return;
+        const config = itemConfigs[configId];
+        const isInner = container.classList.contains('model-area');
+        const settings = isInner ? config.inner : config.cover;
+        
+        const scene = new THREE.Scene();
+        
+        // 关键逻辑：如果 offset 为 0，则退回到 CSS 指定的 240/180
+        const width = container.offsetWidth || 240; 
+        const height = container.offsetHeight || 180;
+
+        const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+        camera.position.z = 5;
+        const renderer = new THREE.WebGLRenderer({ antialias: !isMosaic, alpha: true });
+        
+        if (isMosaic) {
+            const ps = 0.08; 
+            renderer.setSize(width * ps, height * ps);
+            renderer.domElement.classList.add('pixel-mosiac-canvas');
+        } else {
+            renderer.setSize(width, height);
+            renderer.setPixelRatio(window.devicePixelRatio);
+        }
+        container.appendChild(renderer.domElement);
+
+        rendererInstances.set(container, { renderer, camera, sceneReference: scene, isMosaic });
+
+        scene.add(new THREE.AmbientLight(0xffffff, 2.0));
+        const pivot = new THREE.Group();
+        scene.add(pivot);
+        
+        new GLTFLoader().load(config.path, (gltf) => {
+            const model = gltf.scene;
+            const box = new THREE.Box3().setFromObject(model);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            const finalScale = settings.scale / Math.max(size.x, size.y, size.z); 
+            model.scale.setScalar(finalScale);
+            model.position.sub(center.multiplyScalar(finalScale)); 
+            pivot.position.set(settings.pos[0], settings.pos[1], settings.pos[2]);
+            pivot.rotation.set(settings.rot[0], settings.rot[1], settings.rot[2]);
+            pivot.add(model);
+        });
+
+        function animate() { 
+            requestAnimationFrame(animate); 
+            if (rotationManager.get(parentFolder)) pivot.rotation.y += 0.005; 
+            renderer.render(scene, camera); 
+        }
+        animate();
+    }
+
+    function refreshInnerModel(folder) {
+        const area = folder.querySelector('.model-area');
+        if (!area) return;
+        const inst = rendererInstances.get(area);
+        if (inst) {
+            // 此时 folder 已经 flipped，area 应该有尺寸了
+            const w = area.offsetWidth || 240;
+            const h = area.offsetHeight || 180;
+            
+            inst.renderer.domElement.style.width = '100%';
+            inst.renderer.domElement.style.height = '100%';
+
+            if (inst.isMosaic) {
+                inst.renderer.setSize(w * 0.08, h * 0.08);
+            } else {
+                inst.renderer.setSize(w, h);
+                inst.renderer.setPixelRatio(window.devicePixelRatio);
+            }
+            inst.camera.aspect = w / h;
+            inst.camera.updateProjectionMatrix();
+        }
+    }
+
+    function injectElementsNow(folder) {
+        rotationManager.set(folder, false);
+        const shadow = folder.querySelector('.folder-shadow');
+        const faceB = folder.querySelector('.face-b');
+        const config = itemConfigs[folder.id];
+
+        if (shadow.querySelector('.content-fix-box')) {
+            const existingBtn = document.querySelector(`.back-btn-for-${folder.id}`);
+            if (existingBtn) {
+                existingBtn.style.opacity = '1';
+                existingBtn.style.pointerEvents = 'auto';
+            }
+            refreshInnerModel(folder);
+            return;
+        }
+
+        let mainContent = "";
+        if (folder.id === 'folder-1') mainContent = `<h3>被锁住的</h3><p>这是我小时候的第一本带锁的日记本。<br><br>那时候很怕被人偷看。拿到它之后，我做的第一件事，是把背面的密码提示用记号笔涂掉。<br><br>我当时很确定——这样就不会有人能打开了。<br><br>具体写过些什么已经记不清了，只记得如果和爸爸妈妈吵架了，我就会一边哭，一边把那些话写进这本日记里。<br><br>再后来，我长大了一点，想再看看当时写了什么。才发现，我已经不记得密码了。<br><br>我试过很多次，也想过直接把锁撬开。但最后没有，我还是把它完整的留下来了，没有再打开。</p>`;
+        else if (folder.id === 'folder-2') mainContent = `<h3>哑巴小狗</h3><p>小时候父母为了让我自己一个人睡觉，给我买了这只玩具小狗。<br><br>给它装上电池，小狗就会说话。记得第一次电池没电，我还以为小狗死掉了，哭了好久。我会在睡前跟它说遇到的小烦恼、甚至一些傻事。<br><br>它从来没回答我，但好像一直听着一样。<br><br>后来长大了嫌它幼稚，也没有再换新电池，但我还是留着它，一直把它摆在床头。</p>`;
+        else if (folder.id === 'folder-3') mainContent = `<h3>ARCHIVE_03: CONFIDENTIAL</h3><p>该档案涉及核心机密。所有信息内容已进入最高密级锁定，像素化采样已覆盖所有字符。禁止任何形式的逆向工程还原。<br><br>观测者无法通过肉眼直接读取其中的文字信息，所有的历史细节都被刻意隐藏在了方块的阴影之后。<br><br>解密授权：[拒绝访问]</p>`;
+        else if (folder.id === 'folder-4') mainContent = `<h3>一角又一角</h3><p>它原本是一个装巧克力的罐子。<br><br>巧克力吃完之后，小时候的我把它留下来，用来存零花钱。<br><br>钱不是一次性放进去的，都是一角一角、几毛几毛地攒.用十几个一角钱凑出几块钱，去小卖部买冰激凌吃。</p>`;
+        else if (folder.id === 'folder-5') mainContent = `<h3>一只小熊</h3><p>搬家的时候，妈妈本想把它扔掉，说它已经掉毛且满是灰尘。但我记得它是我五岁生日时收到的第一个礼物。物品的价值不在于它的新旧，而在于它承载了多少次失眠时的拥抱。</p>`;
+        else if (folder.id === 'folder-6') mainContent = `<h3>已过期</h3><p>奶奶一直觉得，东西只要冷冻了，就不会坏。<br><br>所以冰箱里总有一些明显已经过期的东西，她拿出来看看，又放回去，说“能吃”。<br><br>我跟她说过几次这瓶调料已经过期了。她不太相信，还偷偷用笔把瓶身上的保质期涂掉了。<br><br>最后我只能把这瓶调料偷偷拿走，换了一瓶新的，放回原来的位置。</p>`;
+
+        shadow.insertAdjacentHTML('beforeend', `<div class="content-fix-box"><div class="main-paper hover-target">${mainContent}</div></div>`);
+        faceB.insertAdjacentHTML('beforeend', `
+            <div class="content-fix-box">
+                <div class="pocket-front"></div>
+                <div class="model-paper hover-target">
+                    <div class="model-area">
+                        <div style="position:absolute; top:8px; right:8px; background:rgba(0,0,0,0.4); color:#fff; font-size:9px; padding:2px 6px; border-radius:4px; pointer-events:none; z-index:100;">双击查看模型</div>
+                    </div>
+                    <div style="font-size: 11px; margin-top: 10px; text-align: left; line-height: 1.6; color: #444; padding-left: 2px;">
+                        物品：${config.info.name}<br>
+                        ${config.info.time}<br>
+                        ${config.info.desc}
+                    </div>
+                </div>
+            </div>`);
+
+        const area = faceB.querySelector('.model-area');
+        area.ondblclick = (e) => { e.stopPropagation(); openViewer(folder.id); };
+        
+        // 此处延迟一个 requestAnimationFrame 以确保 DOM 已经完全插入
+        requestAnimationFrame(() => {
+            initThreeJS(area, folder.id, folder, folder.id === 'folder-3');
+            // 初始化后再刷一次
+            setTimeout(() => refreshInnerModel(folder), 100);
+        });
+
+        const paper = faceB.querySelector('.model-paper');
+        paper.onmousedown = (e) => { dragStartY = e.clientY; activeDrag = 'paper'; e.stopPropagation(); };
+        
+        const btn = document.createElement('div');
+        btn.className = `back-btn-common back-btn-for-${folder.id}`; 
+        btn.innerText = '< 返回';
+        document.body.appendChild(btn);
+        
+        setTimeout(() => { if (folder.classList.contains('flipped')) { btn.style.opacity = '1'; btn.style.pointerEvents = 'auto'; } }, 1300);
+        
+        btn.onclick = (e) => {
+            e.stopPropagation();
+            rotationManager.set(folder, true); 
+            folder.classList.remove('flipped');
+            folder.classList.add('pulled-out');
+            folder.style.transform = ""; 
+            
+            setTimeout(() => {
+                folder.style.zIndex = "";
+                folders.forEach(f => { f.style.opacity = "1"; }); 
+                panel.style.opacity = "1"; 
+                document.getElementById('global-exit-btn').style.opacity = '1';
+                btn.style.opacity = '0';
+                btn.style.pointerEvents = 'none';
+            }, 1000);
+        };
+    }
+
+    folders.forEach((folder) => {
+        rotationManager.set(folder, true);
+        initThreeJS(folder.querySelector('.model-slot'), folder.id, folder, folder.id === 'folder-3');
+        folder.onmousedown = (e) => { if (!folder.classList.contains('flipped')) { startY = e.clientY; activeFolder = folder; } };
+        folder.ondblclick = (e) => {
+            if (e.target.closest('.model-paper') || !folder.classList.contains('pulled-out')) return;
+            document.getElementById('global-exit-btn').style.opacity = '0';
+            folder.classList.remove('pulled-out');
+            setTimeout(() => {
+                folders.forEach(f => { if (f !== folder) f.style.opacity = "0"; });
+                panel.style.opacity = "0";
+                setTimeout(() => {
+                    folder.style.zIndex = "9999";
+                    const ty = (window.innerHeight / 2) - (folder.getBoundingClientRect().top + 190);
+                    folder.style.transform = `translate(190px, ${ty}px) rotateZ(90deg)`;
+                    setTimeout(() => { 
+                        folder.classList.add('flipped'); 
+                        injectElementsNow(folder); 
+                        // 在翻转动画的不同阶段多次强制刷新
+                        setTimeout(() => refreshInnerModel(folder), 500);
+                        setTimeout(() => refreshInnerModel(folder), 1500);
+                        setTimeout(() => refreshInnerModel(folder), 2500);
+                    }, 1300);
+                }, 600);
+            }, 400);
+        };
+    });
+
+    window.onmousemove = (e) => {
+        if (activeDrag === 'paper') {
+            const paper = document.querySelector('.folder.flipped .model-paper');
+            if (paper && dragStartY - e.clientY > 30) paper.classList.add('extracted');
+            else if (paper && dragStartY - e.clientY < -30) paper.classList.remove('extracted');
+        }
+    };
+
+    window.onmouseup = (e) => {
+        if (activeFolder) {
+            const diff = startY - e.clientY;
+            if (diff > 50) { folders.forEach(f => f.classList.remove('pulled-out')); activeFolder.classList.add('pulled-out'); }
+            else if (diff < -50) activeFolder.classList.remove('pulled-out');
+        }
+        activeFolder = null; activeDrag = null;
+    };
+
+    initGlobalViewer();
+</script>
+</body>
+</html>
