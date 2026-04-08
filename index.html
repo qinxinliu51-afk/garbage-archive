@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Garbage Museum - Home</title>
+    <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f7f5f2;
+            --accent-color: #222;
+        }
+
+        body, html {
+            margin: 0; padding: 0; height: 100%;
+            background-color: var(--bg-color);
+            font-family: 'Space Mono', monospace;
+            overflow: hidden;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: flex-start;
+            /* 控制整页淡出的过渡 */
+            transition: opacity 0.8s ease-in-out;
+        }
+
+        body.page-fade-out {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* --- 导航栏 --- */
+        .nav { 
+            position: fixed; top: 0; width: 100%; height: 80px;
+            display: flex; justify-content: center; align-items: center;
+            gap: 60px; z-index: 9999; background: rgba(247, 245, 242, 0.7);
+            backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+        }
+        .nav a { 
+            font-family: 'Space Mono', monospace; font-size: 12px; text-decoration: none; 
+            color: #888; letter-spacing: 3px; text-transform: uppercase;
+            transition: all 0.3s ease; padding: 10px 15px; line-height: 1; font-weight: 400;
+        }
+        .nav a:hover { color: #000; }
+        .nav a.active { color: #222; font-weight: 700; border-bottom: 2px solid #222; }
+
+        /* --- 首页装饰 --- */
+        .coffee-stain {
+            position: absolute; top: 10%; left: 5%;
+            width: 200px; height: 200px;
+            background: url('https://www.transparentpng.com/download/coffee-stain/circle-coffee-stain-png-transparent-14.png') no-repeat center;
+            background-size: contain;
+            opacity: 0.1; transform: rotate(-15deg);
+            z-index: 0; pointer-events: none;
+        }
+
+        .header {
+            position: absolute; top: 22vh; 
+            text-align: center;
+            z-index: 10; pointer-events: none;
+        }
+
+        .museum-name {
+            font-family: 'Dancing Script', cursive;
+            font-size: 5.5rem; color: var(--accent-color); margin: 0;
+        }
+
+        .subtitle {
+            font-size: 1.2rem; letter-spacing: 6px; color: #999;
+            text-transform: uppercase; margin-top: 15px;
+        }
+
+        /* --- 垃圾桶容器 --- */
+        .bin-container {
+            position: absolute; bottom: 8%; left: 50%;
+            transform: translateX(-50%);
+            width: 350px; height: 450px;
+            z-index: 5; cursor: pointer;
+            display: flex; align-items: flex-end; justify-content: center;
+            transition: transform 0.1s ease-out; user-select: none;
+        }
+
+        #binImage {
+            width: 100%; height: auto;
+            filter: drop-shadow(15px 25px 35px rgba(0,0,0,0.1));
+            transition: transform 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            transform: rotate(3deg); pointer-events: none; z-index: 6;
+        }
+
+        /* --- 飞出的 PNG 物品 --- */
+        .fly-item {
+            position: absolute; z-index: 4; /* 置于垃圾桶图片之后 */
+            opacity: 0; pointer-events: none;
+            /* 重点：位移用 0.8s，透明度也同步用 0.8s 且线性变化，保证飞回途中一直可见 */
+            transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1), 
+                        opacity 0.8s linear; 
+            bottom: 120px;
+        }
+
+        .hint-text {
+            position: absolute; top: -5px;
+            background: rgba(34, 34, 34, 0.8); color: white;
+            padding: 8px 15px; border-radius: 20px;
+            font-size: 11px; white-space: nowrap;
+            opacity: 0; transition: opacity 0.3s, transform 0.3s;
+            transform: translateY(10px); pointer-events: none; z-index: 10;
+        }
+
+        .bin-container:hover .hint-text { opacity: 1; transform: translateY(0); }
+        body.is-bin-open .hint-text { display: none; }
+
+        .explore-btn {
+            position: fixed; 
+            bottom: 8vh; left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: rgba(34, 34, 34, 0.8);
+            color: white; padding: 10px 24px;
+            border-radius: 30px; font-size: 13px;
+            text-decoration: none; white-space: nowrap;
+            letter-spacing: 2px; opacity: 0;
+            pointer-events: none; z-index: 100;
+            transition: all 0.5s cubic-bezier(0.19, 1, 0.22, 1);
+            cursor: pointer; border: none; font-family: 'Space Mono', monospace;
+        }
+
+        body.is-bin-open .explore-btn {
+            opacity: 1; pointer-events: auto;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .explore-btn:hover { background: #000; transform: translateX(-50%) scale(1.1); }
+    </style>
+</head>
+<body id="mainBody">
+
+    <nav class="nav">
+        <a href="index.html" class="active">Home</a>
+        <a href="javascript:void(0)" onclick="handleTransition('collection.html')">Collection</a>
+        <a href="javascript:void(0)" onclick="handleTransition('about.html')">me</a>
+    </nav>
+
+    <div class="coffee-stain"></div>
+    <div class="header">
+        <h1 class="museum-name">'Garbage' Archive</h1>
+        <div class="subtitle">建立一个属于你的垃圾档案馆</div>
+    </div>
+
+    <div class="bin-container" id="mainBin">
+        <div class="hint-text">双击开启垃圾桶</div>
+        <img src="garbagebin1.png" id="binImage" alt="Bin">
+    </div>
+
+    <button class="explore-btn" onclick="handleTransition('collection.html')">进入档案馆 ></button>
+
+    <script>
+        const container = document.getElementById('mainBin');
+        const img = document.getElementById('binImage');
+        const body = document.getElementById('mainBody');
+        
+        const images = { default: "garbagebin1.png", hover: "garbagebinclose.png", open: "garbagebin.png" };
+
+        const bookPositions = [
+            { x: -500, y: -270, r: -15, w: 110 }, { x: -320, y: -500, r: -5,  w: 110 }, 
+            { x: -210, y: -200, r: -20, w: 110 }, { x: 300,  y: -350, r: -10, w: 110 }, 
+            { x: 400,  y: -480, r: 15,  w: 110 }  
+        ];
+
+        const extraItems = [
+            { src: "film.png", pos: { x: -550, y: -10, r: 10, w: 700 } },
+            { src: "bag.png", pos: { x: -600, y: -190, r: -8, w: 750 } },
+            { src: "shelf.png", pos: { x: 150, y: -30, r: 5, w: 740 } },
+            { src: "camera.png", pos: { x: 550, y: -360, r: -25, w: 600 } },
+            { src: "mdl.png", pos: { x: -400, y: -50, r: 15, w: 1000 } }
+        ];
+
+        let isOpen = false;
+        let allFlyElements = [];
+
+        function initItems() {
+            [...bookPositions.map(p => ({src:"book.png", pos:p})), ...extraItems].forEach(item => {
+                const el = document.createElement('img');
+                el.src = item.src;
+                el.className = 'fly-item';
+                el.style.width = (item.pos.w || 110) + "px"; 
+                el.dataset.targetPos = JSON.stringify(item.pos);
+                container.appendChild(el);
+                allFlyElements.push(el);
+            });
+        }
+        initItems();
+
+        container.addEventListener('mouseenter', () => { if (!isOpen) img.src = images.hover; });
+        container.addEventListener('mouseleave', () => { if (!isOpen) img.src = images.default; });
+
+        container.addEventListener('dblclick', () => {
+            toggleBin();
+        });
+
+        function toggleBin() {
+            isOpen = !isOpen;
+            if (isOpen) {
+                body.classList.add('is-bin-open');
+                img.src = images.open;
+                img.style.transform = "rotate(0deg) scale(1.1)";
+                allFlyElements.forEach(el => {
+                    const pos = JSON.parse(el.dataset.targetPos);
+                    el.style.opacity = "1";
+                    el.style.transform = `translate(${pos.x}px, ${pos.y}px) rotate(${pos.r}deg)`;
+                });
+            } else {
+                closeBinAnim();
+            }
+        }
+
+        function closeBinAnim() {
+            isOpen = false;
+            body.classList.remove('is-bin-open');
+            // 物品飞回垃圾桶中心
+            allFlyElements.forEach(el => {
+                el.style.transform = `translate(0, 0) rotate(0deg)`;
+                el.style.opacity = "0"; // 这里 0.8s 的透明度过渡会保证飞回途中一直可见
+            });
+            // 桶盖延迟 0.4s 合上，此时物品已经快到桶口了
+            setTimeout(() => {
+                if (!isOpen) {
+                    img.src = images.default;
+                    img.style.transform = "rotate(3deg) scale(1)";
+                }
+            }, 400);
+        }
+
+        // --- 核心转场逻辑 ---
+        async function handleTransition(targetUrl) {
+            // 如果垃圾桶开着，先执行完整的收回动画
+            if (isOpen) {
+                closeBinAnim();
+                // 等待物品完全飞回并消失 (0.8s 位移时长)
+                await new Promise(resolve => setTimeout(resolve, 800));
+            }
+
+            // 开始整页淡出
+            body.classList.add('page-fade-out');
+
+            // 等待淡出完成后跳转页面
+            setTimeout(() => {
+                window.location.href = targetUrl;
+            }, 800);
+        }
+
+        document.addEventListener('mousemove', (e) => {
+            const x = (window.innerWidth / 2 - e.clientX) / 50;
+            const y = (window.innerHeight / 2 - e.clientY) / 50;
+            container.style.transform = `translateX(calc(-50% + ${x}px)) translateY(${y}px)`;
+        });
+    </script>
+</body>
+</html>

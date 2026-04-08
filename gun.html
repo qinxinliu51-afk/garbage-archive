@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Archive - Garbage Museum</title>
+    <script type="importmap">
+        { 
+            "imports": { 
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            } 
+        }
+    </script>
+    <style>
+        :root {
+            --bg-color: #ece9e4; 
+            --glass-bg: rgba(252, 252, 252, 1);
+            --border-color: #00000096;
+            --pull-dist: -320px; 
+            --hover-stroke: #4a90e2;
+        }
+
+        body {
+            margin: 0; background-color: var(--bg-color);
+            display: flex; justify-content: center; align-items: flex-end;
+            height: 100vh; overflow: hidden;
+            font-family: "Helvetica Neue", Arial, sans-serif; user-select: none;
+        }
+
+        #global-exit-btn {
+            position: fixed; top: 30px; left: 30px; padding: 12px 24px; 
+            background: rgba(255, 255, 255, 0.6); backdrop-filter: blur(10px);
+            border: 1px solid rgba(0,0,0,0.1); border-radius: 50px;
+            color: #111; font-size: 14px; font-weight: bold; cursor: pointer;
+            z-index: 5000; box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            transition: all 0.3s ease; display: flex; align-items: center;
+        }
+        #global-exit-btn:hover { background: rgba(255, 255, 255, 0.9); transform: translateX(-3px); }
+
+        .back-btn-common {
+            position: fixed; top: 30px; left: 30px; padding: 12px 24px; 
+            background: rgba(255, 255, 255, 0.6); backdrop-filter: blur(10px);
+            border: 1px solid rgba(0,0,0,0.1); border-radius: 50px;
+            color: #111; font-size: 14px; font-weight: bold; cursor: pointer;
+            z-index: 30000; box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            transition: all 0.3s ease; opacity: 0; pointer-events: none;
+        }
+
+        #viewer-overlay {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: var(--bg-color); z-index: 20000;
+            display: none; opacity: 0; transition: opacity 0.4s ease;
+            cursor: grab;
+        }
+        #viewer-overlay.active { display: block; opacity: 1; }
+
+        .cabinet {
+            position: relative; width: 800px; height: 600px; 
+            perspective: 3000px; margin-bottom: 50px;
+        }
+
+        .folder {
+            position: absolute; width: 100%; height: 380px; left: 0;
+            transform-origin: center center;
+            transition: transform 1.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.7s;
+            filter: drop-shadow(0px -1px 0px var(--border-color)) 
+                    drop-shadow(1px 0px 0px var(--border-color)) 
+                    drop-shadow(-1px 0px 0px var(--border-color));
+            transform-style: preserve-3d;
+            z-index: 10; 
+        }
+
+        .folder.pulled-out { transform: translateY(var(--pull-dist)) rotateX(-10deg) !important; }
+
+        .folder-shadow {
+            position: absolute; width: 100%; height: 100%;
+            background: #fdfdfd; border: 1px solid var(--border-color); 
+            border-radius: 12px 12px 0 0; opacity: 0; pointer-events: none;
+        }
+
+        .flipped .folder-shadow { opacity: 1; transition: opacity 0.4s ease; }
+
+        .book-wrap {
+            width: 100%; height: 100%; position: relative;
+            transform-style: preserve-3d; transition: transform 2s cubic-bezier(0.4, 0, 0.2, 1);
+            transform-origin: center bottom;
+        }
+
+        .flipped .book-wrap { transform: rotateX(180deg); }
+
+        .face {
+            position: absolute; width: 100%; height: 100%;
+            backface-visibility: hidden; border: 1px solid var(--border-color);
+            transform-style: preserve-3d;
+        }
+
+        .face-a {
+            background: var(--glass-bg); display: flex; flex-direction: column; 
+            align-items: center; padding-top: 45px; z-index: 2; border-radius: 12px 12px 0 0;
+        }
+
+        .face-b {
+            background: #fdfdfd; transform: rotateX(180deg); 
+            z-index: 1; border-radius: 0 0 12px 12px; 
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        .hover-target { transition: all 0.3s; outline: 2px solid transparent; outline-offset: -2px; }
+        .hover-target:hover { outline: 2px solid var(--hover-stroke); }
+
+        /* 模型展示区域 */
+        .model-area { 
+            position: relative; width: 100%; height: 180px; background: #f4f4f4; cursor: pointer; 
+        }
+        
+        /* 提示框：定位在右上角 */
+        .hover-hint {
+            position: absolute; 
+            top: 8px; 
+            right: 8px;
+            background: rgba(0, 0, 0, 0.5); 
+            color: white; 
+            padding: 4px 8px;
+            border-radius: 4px; 
+            font-size: 10px; 
+            opacity: 0; 
+            pointer-events: none;
+            transition: opacity 0.3s ease; 
+            z-index: 100; /* 确保在 Canvas 之上 */
+            white-space: nowrap;
+        }
+        .model-area:hover .hover-hint { opacity: 1; }
+
+        /* 内部 Canvas 容器需要填满且不影响定位 */
+        .model-area canvas { position: absolute; top: 0; left: 0; z-index: 1; }
+
+        .model-slot { width: 85%; height: 300px; background: rgba(0,0,0,0.03); border-radius: 8px; }
+
+        .main-paper {
+            width: 85%; min-height: 650px; background: #fdfaf3; box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            padding: 40px; box-sizing: border-box; border: 1px solid #d4cbb3;
+        }
+        .main-paper h3 { margin: 0 0 20px 0; border-bottom: 2px solid #333; font-size: 18px; letter-spacing: 2px; }
+        .main-paper p { 
+            font-size: 14px; line-height: 1.8; color: #333; 
+            background: linear-gradient(#f0f0f0 1px, transparent 1px); 
+            background-size: 100% 1.8em; text-align: justify;
+        }
+
+        .garbage-badge {
+            position: absolute; top: 15px; left: 50%; transform: translateX(-50%);
+            background-color: #add8e6; padding: 5px 18px; border-radius: 20px;
+            font-size: 11px; font-weight: bold; color: #444; border: 1px solid rgba(0,0,0,0.15); z-index: 100;
+        }
+
+        .tab {
+            position: absolute; top: -39px; height: 40px; width: 180px;
+            background: var(--glass-bg); border-radius: 12px 12px 0 0;
+            display: flex; align-items: center; justify-content: center;
+            border: 1px solid var(--border-color); border-bottom: none; 
+            transform: perspective(100px) rotateX(25deg) translateZ(1px);
+        }
+        .tab span { color: #222; font-size: 11px; font-weight: bold; transform: rotateX(-25deg); transition: opacity 0.3s; }
+
+        .pocket-front { 
+            position: absolute; left: 40px; bottom: 60px; width: 300px; height: 90px; 
+            background: rgba(225, 241, 246, 0.85); backdrop-filter: blur(0.5px); 
+            border: 1px solid rgba(255,255,255,0.4); border-top: none; border-radius: 0 0 8px 8px; z-index: 20;
+        }
+
+        .model-paper {
+            position: absolute; left: 50px; bottom: 80px; width: 280px; height: 320px; background: #fff;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1); padding: 20px; box-sizing: border-box; border: 1px solid #ddd; 
+            z-index: 5; transition: transform 0.4s;
+        }
+        .model-paper.extracted { transform: translateY(-130px) !important; }
+
+        .front-panel {
+            position: absolute; width: 100%; height: 380px; bottom: -50px;
+            background: rgba(220, 228, 232, 0.9); backdrop-filter: blur(15px);
+            border: 1.5px solid var(--border-color); border-radius: 12px 12px 0 0; 
+            z-index: 100; 
+            pointer-events: none; 
+            transition: opacity 0.5s;
+        }
+
+        .content-fix-box {
+            transform: rotate(-90deg); position: absolute;
+            top: 50%; left: 50%; translate: -50% -50%;
+            display: flex; align-items: center; justify-content: center;
+            width: 380px; height: 800px; pointer-events: none;
+        }
+        .content-fix-box > * { pointer-events: auto; }
+
+        .f1 { bottom: 0px; } 
+        .f1 .tab { left: 40px; }
+    </style>
+</head>
+<body>
+
+<div id="global-exit-btn">< 返回</div>
+
+<div id="viewer-overlay">
+    <div class="back-btn-common" id="viewer-close-btn" style="opacity: 1; pointer-events: auto;">< 返回</div>
+</div>
+
+<div class="cabinet">
+    <div class="folder f1" id="folder-1">
+        <div class="folder-shadow"></div>
+        <div class="book-wrap">
+            <div class="tab"><span>天才手枪</span></div>
+            <div class="face face-a"><div class="model-slot"></div></div>
+            <div class="face face-b"></div>
+        </div>
+    </div>
+    <div class="front-panel">
+        <div class="garbage-badge">GARBAGE ARCHIVE</div>
+    </div>
+</div>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    function handleSmartBack() {
+        window.location.href = 'collection.html';
+    }
+
+    document.getElementById('global-exit-btn').onclick = handleSmartBack;
+
+    const itemConfigs = {
+        "folder-1": { path: "gun.glb", cover: { scale: 3.5, pos: [0, 0, 0], rot: [1, 1.5, 0] }, inner: { scale: 3.2, pos: [0, 0, 0], rot: [1, 0.5, 0] }, full: { scale: 4.5, pos: [0, 0, 0], rot: [1, 1.5, 0] } }
+    };
+
+    let startY = 0, activeFolder = null, activeDrag = null, dragStartY = 0;
+    const folders = document.querySelectorAll('.folder');
+    const panel = document.querySelector('.front-panel');
+    const rotationManager = new Map();
+
+    const viewerOverlay = document.getElementById('viewer-overlay');
+    let viewerScene, viewerCamera, viewerRenderer, viewerPivot;
+    let isDraggingViewer = false, previousMousePosition = { x: 0, y: 0 };
+
+    function initGlobalViewer() {
+        viewerScene = new THREE.Scene();
+        viewerCamera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        viewerCamera.position.z = 8;
+        viewerRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        viewerRenderer.setSize(window.innerWidth, window.innerHeight);
+        viewerRenderer.setPixelRatio(window.devicePixelRatio);
+        viewerOverlay.appendChild(viewerRenderer.domElement);
+        viewerScene.add(new THREE.AmbientLight(0xffffff, 2.5));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        dirLight.position.set(5, 5, 5);
+        viewerScene.add(dirLight);
+        viewerOverlay.addEventListener('mousedown', e => { isDraggingViewer = true; previousMousePosition = { x: e.clientX, y: e.clientY }; });
+        window.addEventListener('mousemove', e => {
+            if (!isDraggingViewer || !viewerPivot) return;
+            const deltaMove = { x: e.clientX - previousMousePosition.x, y: e.clientY - previousMousePosition.y };
+            viewerPivot.rotation.y += deltaMove.x * 0.01;
+            viewerPivot.rotation.x += deltaMove.y * 0.01;
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+        window.addEventListener('mouseup', () => isDraggingViewer = false);
+        function animateViewer() { requestAnimationFrame(animateViewer); viewerRenderer.render(viewerScene, viewerCamera); }
+        animateViewer();
+    }
+
+     function openViewer(configId) {
+        const config = itemConfigs[configId];
+        if (!config) return;
+        if(viewerPivot) viewerScene.remove(viewerPivot);
+        viewerOverlay.classList.add('active');
+        const isMosaic = (configId === 'folder-3');
+        const w = window.innerWidth, h = window.innerHeight;
+        if (isMosaic) {
+            const ps = 0.06;
+            viewerRenderer.setSize(w * ps, h * ps);
+            viewerRenderer.domElement.style.width = '100vw';
+            viewerRenderer.domElement.style.height = '100vh';
+            viewerRenderer.domElement.classList.add('pixel-mosiac-canvas');
+        } else {
+            viewerRenderer.setSize(w, h);
+            viewerRenderer.domElement.style.width = '100vw';
+            viewerRenderer.domElement.style.height = '100vh';
+            viewerRenderer.domElement.classList.remove('pixel-mosiac-canvas');
+        }
+        viewerCamera.aspect = w / h;
+        viewerCamera.updateProjectionMatrix();
+        new GLTFLoader().load(config.path, (gltf) => {
+            const model = gltf.scene;
+            const box = new THREE.Box3().setFromObject(model);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            viewerPivot = new THREE.Group();
+            const scale = config.full.scale / Math.max(size.x, size.y, size.z);
+            model.scale.setScalar(scale);
+            model.position.sub(center.multiplyScalar(scale)); 
+            viewerPivot.add(model);
+            viewerPivot.rotation.set(config.full.rot[0], config.full.rot[1], config.full.rot[2]);
+            viewerScene.add(viewerPivot);
+        });
+    }
+
+    document.getElementById('viewer-close-btn').onclick = () => viewerOverlay.classList.remove('active');
+
+    function initThreeJS(container, configId, parentFolder) {
+        if (!container || (container.querySelector('canvas'))) return;
+        const config = itemConfigs[configId];
+        if (!config) return;
+        const isInner = container.classList.contains('model-area');
+        const settings = isInner ? config.inner : config.cover;
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+        camera.position.z = 5;
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        container.appendChild(renderer.domElement);
+        scene.add(new THREE.AmbientLight(0xffffff, 2.0));
+        const pivot = new THREE.Group();
+        scene.add(pivot);
+        new GLTFLoader().load(config.path, (gltf) => {
+            const model = gltf.scene;
+            const box = new THREE.Box3().setFromObject(model);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            const finalScale = settings.scale / Math.max(size.x, size.y, size.z); 
+            model.scale.setScalar(finalScale);
+            model.position.sub(center.multiplyScalar(finalScale)); 
+            pivot.position.set(settings.pos[0], settings.pos[1], settings.pos[2]);
+            pivot.rotation.set(settings.rot[0], settings.rot[1], settings.rot[2]);
+            pivot.add(model);
+        });
+        function animate() { 
+            requestAnimationFrame(animate); 
+            if (rotationManager.get(parentFolder)) pivot.rotation.y += 0.005; 
+            renderer.render(scene, camera); 
+        }
+        animate();
+    }
+
+    function injectElementsNow(folder) {
+        rotationManager.set(folder, false);
+        const shadow = folder.querySelector('.folder-shadow');
+        const faceB = folder.querySelector('.face-b');
+        if (shadow.querySelector('.content-fix-box')) return;
+
+        shadow.insertAdjacentHTML('beforeend', `<div class="content-fix-box"><div class="main-paper hover-target"><h3>天才手枪</h3><p>这把假手枪是我高三的时候放在桌上的，真的不是拿来玩的，是拿来写作业用的。<br><br>那段时间特别容易卡题，压力也大。所以发明出一做不出来题就拿枪抵着自己的学习方法，危机感一来，题不就做出来了。<br><br>当然也可以抵在同桌头上，同桌做出来了就抄他的。</p></div></div>`);
+        
+        faceB.insertAdjacentHTML('beforeend', `
+            <div class="content-fix-box">
+                <div class="pocket-front"></div>
+                <div class="model-paper hover-target">
+                    <div class="model-area">
+                        <div class="hover-hint">双击查看模型</div>
+                    </div>
+                    <div style="font-size: 11px; margin-top: 10px; text-align: left; line-height: 1.6; color: #444; padding-left: 2px;">
+                        物品：小手枪<br>
+                        约2020-至今<br>
+                        苦命高三生专武
+                    </div>
+                </div>
+            </div>`);
+
+        const area = faceB.querySelector('.model-area');
+        area.ondblclick = (e) => { e.stopPropagation(); openViewer(folder.id); };
+        initThreeJS(area, folder.id, folder);
+
+        const paper = faceB.querySelector('.model-paper');
+        paper.onmousedown = (e) => { dragStartY = e.clientY; activeDrag = 'paper'; e.stopPropagation(); };
+    }
+
+    folders.forEach((folder) => {
+        rotationManager.set(folder, true);
+        initThreeJS(folder.querySelector('.model-slot'), folder.id, folder);
+        folder.onmousedown = (e) => { 
+            if (!folder.classList.contains('flipped')) { 
+                startY = e.clientY; 
+                activeFolder = folder; 
+            } 
+        };
+        folder.ondblclick = (e) => {
+            if (e.target.closest('.model-paper') || !folder.classList.contains('pulled-out')) return;
+            triggerOpenFolder(folder);
+        };
+    });
+
+    function triggerOpenFolder(folder) {
+        folder.classList.remove('pulled-out');
+        setTimeout(() => {
+            panel.style.opacity = "0";
+            setTimeout(() => {
+                folder.style.zIndex = "9999";
+                const ty = (window.innerHeight / 2) - (folder.getBoundingClientRect().top + 190);
+                folder.style.transform = `translate(190px, ${ty}px) rotateZ(90deg)`;
+                setTimeout(() => { 
+                    folder.classList.add('flipped'); 
+                    injectElementsNow(folder); 
+                }, 1300);
+            }, 600);
+        }, 400);
+    }
+
+    window.onmousemove = (e) => {
+        if (activeDrag === 'paper') {
+            const paper = document.querySelector('.folder.flipped .model-paper');
+            if (dragStartY - e.clientY > 30) paper.classList.add('extracted');
+            else if (dragStartY - e.clientY < -30) paper.classList.remove('extracted');
+        }
+    };
+
+    window.onmouseup = (e) => {
+        if (activeFolder) {
+            const diff = startY - e.clientY;
+            if (diff > 50) activeFolder.classList.add('pulled-out');
+            else if (diff < -50) activeFolder.classList.remove('pulled-out');
+        }
+        activeFolder = null; activeDrag = null;
+    };
+
+    initGlobalViewer();
+</script>
+</body>
+</html>
